@@ -28,11 +28,12 @@ in different L3 groups means they're on physically separate caches, not
 just separate cores sharing one contended cache.
 
 This connects directly to the oneDNN global-primitive-cache contention
-already diagnosed in [Isidorus](../isidorus) as the root cause of its p99
-latency spikes at higher concurrency: a native addon's own thread pool
-fighting Node's threads for the same L3 domain is the same mechanism this
-benchmark isolates, just externally controlled via `taskset` instead of
-happening incidentally.
+already diagnosed in [Isidorus's own BERT latency benchmarks](https://github.com/A-KGeorge/isidorus-bench/blob/main/charts/inference_bert_model_auto_latency_detailed.png)
+as the root cause of its p99 latency spikes at higher concurrency (the p99
+line sits flat through C=4, then kinks upward): a native addon's own
+thread pool fighting Node's threads for the same L3 domain is the same
+mechanism this benchmark isolates, just externally controlled via
+`taskset` instead of happening incidentally.
 
 If a run reports a topology with anything other than exactly two L3 groups
 (e.g. a different CPU, or a machine with a real NUMA split), the harness
