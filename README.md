@@ -1,5 +1,7 @@
 # Thread affinity contention benchmark
 
+**TL;DR:** A synthetic Node.js benchmark isolating what CPU affinity actually buys you when libuv's threadpool contends with a separately-threaded native addon in the same process. Ryzen 9 5900X, run 4 independent times. Naively `taskset -p`'ing the whole process onto one CPU set -- the only option today -- roughly triples p99 event-loop delay, reproduced in all 4 runs. Selective per-thread pinning and just sizing the addon's pool to its own cores each help too, but modestly (4-8%). Full numbers, methodology, and why `max` isn't trustworthy at this sample size are further down in "Real hardware this was run on."
+
 Evidence-gathering benchmark for two proposed Node.js/libuv env vars:
 `UV_THREADPOOL_AFFINITY` (libuv/libuv) and `NODE_MAIN_THREAD_AFFINITY`
 (nodejs/node). Both would let Node pin its own threads (the event loop /
@@ -17,7 +19,7 @@ and is that different from just telling the addon to use fewer threads?
 
 The target machine (a Ryzen 9 5900X: 12 cores / 24 threads across two CCDs,
 6 cores each) is a single NUMA node under Linux — there's no NUMA boundary
-to pin around here. What *does* exist is two separate 32MB L3 caches, one
+to pin around here. What _does_ exist is two separate 32MB L3 caches, one
 per CCD, not shared with each other. So "Node set" and "addon set" in this
 benchmark are the two CPU groups that share an L3 domain, discovered at
 runtime from `/sys/devices/system/cpu/cpu*/cache/index3/shared_cpu_list` —
@@ -100,7 +102,7 @@ leftover state:
 1. **Baseline** — no `taskset` at all, addon spawns one thread per logical
    CPU (24 on the target machine).
 2. **Process-wide pin** — every thread the child process has (main, libuv
-   threadpool, V8 background threads, *and* the addon's threads) gets
+   threadpool, V8 background threads, _and_ the addon's threads) gets
    `taskset -p`'d to the Node-set mask alone. This is what someone
    naively "pinning the whole Node process" would end up doing if they
    applied the same mask process-wide instead of splitting it — it's
@@ -118,13 +120,13 @@ leftover state:
 5. **Sized-down, selectively pinned** — same addon thread count as
    condition 4, plus the selective pinning from condition 3. Since thread
    counts match condition 4, the 4-vs-5 delta isolates the effect of
-   *placement* from the effect of *sizing*.
+   _placement_ from the effect of _sizing_.
 
 Sequencing per condition (see `runCondition` in `benchmark-harness.js` and
 `main()` in `lib/worker-child.js`): the child process loads the addon
 (spawning its threads, named but idle) and warms up the libuv threadpool
 (forcing its worker threads into existence too — they're otherwise created
-lazily on first use, which would be *after* pinning if not forced early),
+lazily on first use, which would be _after_ pinning if not forced early),
 then signals readiness over IPC. The harness enumerates
 `/proc/<pid>/task`, applies the condition's `taskset -p` calls, and
 verifies every pinned thread's `Cpus_allowed_list` actually matches before
@@ -165,7 +167,7 @@ whether single-run numbers were representative or noise.
 
 Event loop delay was measured with `monitorEventLoopDelay({resolution: 10})`,
 which samples every 10ms; raw histogram values are dominated by that 10ms
-floor, so delay *added above* that floor (raw minus 10ms) is what's
+floor, so delay _added above_ that floor (raw minus 10ms) is what's
 compared below — that's where the actual signal is.
 
 `p50Ms` is exactly `10.06` in all 5 conditions across all 4 runs (20/20
@@ -177,16 +179,16 @@ way p99 does — and condition 2 nearly triples p99 relative to baseline
 while p50 doesn't move by even 0.01ms. A number that's identical to two
 decimal places regardless of how contended the machine is isn't workload
 signal, it's `resolution: 10`'s own floor. That's also why this benchmark
-reports p95/p99/max (as delay *added* above the floor) and not p50 at all.
+reports p95/p99/max (as delay _added_ above the floor) and not p50 at all.
 
 **p99 added delay across all 4 runs (mean ± population stdev, range):**
 
-| Condition | Mean | Stdev | Range | vs baseline |
-|---|---|---|---|---|
-| 1. Baseline | 0.97ms | ±0.02ms | 0.94-0.99ms | — |
-| 2. Process-wide pin (naive) | 2.96ms | ±0.03ms | 2.94-3.00ms | +204% |
-| 3. Selective per-thread pin | 0.90ms | ±0.02ms | 0.88-0.92ms | -8% |
-| 4. Sized-down, unpinned | 0.93ms | ±0.02ms | 0.90-0.96ms | -4% |
+| Condition                         | Mean   | Stdev   | Range       | vs baseline          |
+| --------------------------------- | ------ | ------- | ----------- | -------------------- |
+| 1. Baseline                       | 0.97ms | ±0.02ms | 0.94-0.99ms | —                    |
+| 2. Process-wide pin (naive)       | 2.96ms | ±0.03ms | 2.94-3.00ms | +204%                |
+| 3. Selective per-thread pin       | 0.90ms | ±0.02ms | 0.88-0.92ms | -8%                  |
+| 4. Sized-down, unpinned           | 0.93ms | ±0.02ms | 0.90-0.96ms | -4%                  |
 | 5. Sized-down, selectively pinned | 0.90ms | ±0.02ms | 0.88-0.92ms | -7% (-3% vs cond. 4) |
 
 ![p99 event-loop delay by condition, mean ± stdev across 4 runs](results/p99-comparison.png)
@@ -195,7 +197,7 @@ At n=4, p99 is tight: every condition's stdev is around 0.02-0.03ms against
 means of roughly 1-3ms, a coefficient of variation around 2-3%. That's what
 makes condition 2 vs 1 the strongest claim this benchmark supports: naively
 `taskset -p`'ing the whole process onto the Node set (while the addon still
-spawns 24 threads) roughly *triples* p99 added delay, and it did so in all
+spawns 24 threads) roughly _triples_ p99 added delay, and it did so in all
 four independent runs with barely any spread (2.94, 2.95, 2.94, 3.00ms).
 Real evidence for the "why process-level affinity isn't sufficient"
 argument in both proposals, not just reasoning about it.
@@ -211,13 +213,13 @@ percentile.
 
 **max is a different story, and repetition is what exposed it:**
 
-| Condition | Mean | Stdev | CV | Range |
-|---|---|---|---|---|
-| 1. Baseline | 5.09ms | ±1.67ms | 33% | 3.21-7.69ms |
-| 2. Process-wide pin | 11.43ms | ±4.72ms | 41% | 6.40-17.08ms |
-| 3. Selective per-thread pin | 2.08ms | ±1.46ms | 70% | 1.03-4.56ms |
-| 4. Sized-down, unpinned | 7.96ms | ±6.34ms | 80% | 3.08-18.85ms |
-| 5. Sized-down, selectively pinned | 2.44ms | ±1.02ms | 42% | 1.12-3.98ms |
+| Condition                         | Mean    | Stdev   | CV  | Range        |
+| --------------------------------- | ------- | ------- | --- | ------------ |
+| 1. Baseline                       | 5.09ms  | ±1.67ms | 33% | 3.21-7.69ms  |
+| 2. Process-wide pin               | 11.43ms | ±4.72ms | 41% | 6.40-17.08ms |
+| 3. Selective per-thread pin       | 2.08ms  | ±1.46ms | 70% | 1.03-4.56ms  |
+| 4. Sized-down, unpinned           | 7.96ms  | ±6.34ms | 80% | 3.08-18.85ms |
+| 5. Sized-down, selectively pinned | 2.44ms  | ±1.02ms | 42% | 1.12-3.98ms  |
 
 ![p99 vs max across the same 4 runs, showing p99's tight clustering against max's spread](results/p99-vs-max-spread.png)
 
@@ -227,7 +229,7 @@ same four runs, is about as direct as evidence gets that a single-run
 ranged from 3.08ms to 18.85ms added delay across identical runs — a 6x
 spread with nothing about the condition changing. **p95/p99 are the
 metrics this benchmark supports; `max` isn't, at least not without many
-more repeated trials per condition than four.** On the *mean* across all
+more repeated trials per condition than four.** On the _mean_ across all
 four runs, conditions 3 and 5 (both involving selective pinning) do have
 the lowest average max and the tightest condition-2-vs-others gap is
 directionally consistent with the p99 story, but with CVs this high that
@@ -266,7 +268,7 @@ one described above.
 
 ## Non-goals
 
-- Does not modify Node or libuv source. This produces evidence *for* the
+- Does not modify Node or libuv source. This produces evidence _for_ the
   proposal, it isn't the proposal's implementation.
 - Linux only — no Windows/macOS fallback. The harness checks and stops
   with a message on anything else.
