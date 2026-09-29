@@ -1,0 +1,16 @@
+{
+  "name": "contention-addon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Synthetic CPU-heavy native addon that simulates a native library's own pthread pool (e.g. TensorFlow, oneDNN, ONNX Runtime), for thread-affinity contention benchmarking.",
+  "main": "index.js",
+  "gypfile": true,
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean",
+    "selftest": "node test.js"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.0.0"
+  }
+}

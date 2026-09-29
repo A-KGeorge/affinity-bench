@@ -1,0 +1,4 @@
+node_modules/
+contention-addon/build/
+results/*.json
+results/*.md
